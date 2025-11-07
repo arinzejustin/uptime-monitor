@@ -546,4 +546,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**Made with ❤️ for reliable monitoring**
+**Written with ❤️ for reliable monitoring of Axiolot Hub Systems**
