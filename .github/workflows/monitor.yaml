@@ -1,0 +1,90 @@
+name: Uptime Monitor
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch: # Allow manual triggers
+  push:
+    branches:
+      - main
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - '.github/workflows/monitor.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run uptime monitor
+        env:
+          MONITOR_DOMAINS: ${{ secrets.MONITOR_DOMAINS }}
+          API_URL: ${{ secrets.API_URL }}
+          API_KEY: ${{ secrets.API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ENVIRONMENT: ${{ secrets.ENVIRONMENT || 'production' }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'info' }}
+          MONITOR_TIMEOUT: ${{ secrets.MONITOR_TIMEOUT || '30s' }}
+          MONITOR_CONCURRENT: ${{ secrets.MONITOR_CONCURRENT || '5' }}
+          OUTPUT_DIR: ./reports
+        run: |
+          go run .
+        continue-on-error: true
+
+      - name: Upload monitoring reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uptime-reports-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
+
+      - name: Commit reports to repository
+        if: github.event_name == 'schedule'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          if [ -n "$(git status --porcelain reports/)" ]; then
+            git add reports/
+            git commit -m "Add uptime report - $(date +'%Y-%m-%d %H:%M:%S UTC')"
+            git push
+          fi
+        continue-on-error: true
+
+      - name: Check monitoring status
+        run: |
+          if [ -f reports/uptime_report_*.json ]; then
+            LATEST_REPORT=$(ls -t reports/uptime_report_*.json | head -1)
+            DOWNTIME=$(jq '.downtime_count' "$LATEST_REPORT")
+            UPTIME_PERCENT=$(jq '.uptime_percent' "$LATEST_REPORT")
+            
+            echo "Monitoring Summary:"
+            echo "Uptime: ${UPTIME_PERCENT}%"
+            echo "Services Down: ${DOWNTIME}"
+            
+            if [ "$DOWNTIME" -gt 0 ]; then
+              echo "::error::❌ $DOWNTIME service(s) are down!"
+              exit 1
+            else
+              echo "::notice::✅ All services are operational"
+            fi
+          fi
