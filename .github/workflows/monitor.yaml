@@ -3,7 +3,7 @@ name: Uptime Monitor
 on:
   schedule:
     # Run every hour
-    - cron: '0 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch: # Allow manual triggers
   push:
     branches:

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/smtp"
 	"os"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -28,6 +31,14 @@ const (
 	DefaultTimeout    = 30 * time.Second
 	DefaultUserAgent  = ""
 	DefaultConcurrent = 5
+
+	MaxRetries        = 3
+	InitialBackoff    = 1 * time.Second
+	MaxBackoff        = 30 * time.Second
+	BackoffMultiplier = 2.0
+
+	RequestsPerSecond = 10
+	BurstSize         = 20
 )
 
 type HealthCheckResult struct {
@@ -63,18 +74,70 @@ type MonitorConfig struct {
 	APIURL         string
 	APIKey         string
 	Timeout        time.Duration
-	UserAgent      string
+	UserAgent      string // Axiolot-Uptime-bot
 	Concurrent     int
 	Environment    string
 	OutputDir      string
 	SlackWebhook   string
 	DiscordWebhook string
+	EmailAuth      string
+	EmailTo        []string
+	EmailUser      string
+	SMTPHost       string // smtp.gmail.com
+	SMTPPort       string // 587
+	MaxRetries     int
+	RateLimiter    *rate.Limiter
 }
 
 type UptimeMonitor struct {
 	config *MonitorConfig
 	logger *zap.Logger
 	client *http.Client
+}
+
+type RetryConfig struct {
+	MaxRetries        int
+	InitialBackoff    time.Duration
+	MaxBackoff        time.Duration
+	BackoffMultiplier float64
+}
+
+// DefaultRetryConfig returns a default RetryConfig
+func DefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxRetries:        MaxRetries,
+		InitialBackoff:    InitialBackoff,
+		MaxBackoff:        MaxBackoff,
+		BackoffMultiplier: BackoffMultiplier,
+	}
+}
+
+// CalculateBackoff calculates exponential backoff duration
+func (rc RetryConfig) CalculateBackoff(attempt int) time.Duration {
+	backoff := float64(rc.InitialBackoff) * math.Pow(rc.BackoffMultiplier, float64(attempt))
+	if backoff > float64(rc.MaxBackoff) {
+		return rc.MaxBackoff
+	}
+	return time.Duration(backoff)
+}
+
+// IsRetryableError determines if an error should be retried
+func IsRetryableError(err error, statusCode int) bool {
+	if err != nil {
+		return true
+	}
+
+	// Retry on specific status codes
+	switch statusCode {
+	case http.StatusTooManyRequests, // 429
+		http.StatusInternalServerError, // 500
+		http.StatusBadGateway,          // 502
+		http.StatusServiceUnavailable,  // 503
+		http.StatusGatewayTimeout:      // 504
+		return true
+	}
+
+	return false
 }
 
 func NewMonitorConfig() (*MonitorConfig, error) {
@@ -86,6 +149,11 @@ func NewMonitorConfig() (*MonitorConfig, error) {
 	domains := strings.Split(domainsStr, ",")
 	for i, domain := range domains {
 		domains[i] = strings.TrimSpace(domain)
+	}
+
+	emailTo := strings.Split(os.Getenv("EMAIL_TO"), ",")
+	for i, email := range emailTo {
+		emailTo[i] = strings.TrimSpace(email)
 	}
 
 	timeout := DefaultTimeout
@@ -100,6 +168,8 @@ func NewMonitorConfig() (*MonitorConfig, error) {
 		fmt.Sscanf(concurrentStr, "%d", &concurrent)
 	}
 
+	rateLimiter := rate.NewLimiter(rate.Limit(RequestsPerSecond), BurstSize)
+
 	return &MonitorConfig{
 		Domains:        domains,
 		APIURL:         getEnvOrDefault("API_URL", ""),
@@ -111,6 +181,13 @@ func NewMonitorConfig() (*MonitorConfig, error) {
 		OutputDir:      getEnvOrDefault("OUTPUT_DIR", "./reports"),
 		SlackWebhook:   os.Getenv("SLACK_WEBHOOK_URL"),
 		DiscordWebhook: os.Getenv("DISCORD_WEBHOOK_URL"),
+		EmailAuth:      os.Getenv("EMAIL_AUTH"),
+		EmailTo:        emailTo,
+		EmailUser:      os.Getenv("EMAIL_USER"),
+		SMTPHost:       os.Getenv("SMTP_HOST"),
+		SMTPPort:       os.Getenv("SMTP_PORT"),
+		MaxRetries:     MaxRetries,
+		RateLimiter:    rateLimiter,
 	}, nil
 }
 
@@ -139,76 +216,187 @@ func NewUptimeMonitor(config *MonitorConfig, logger *zap.Logger) *UptimeMonitor 
 }
 
 func (m *UptimeMonitor) CheckDomain(ctx context.Context, domain string) HealthCheckResult {
-	result := HealthCheckResult{
-		Domain:    domain,
-		URL:       domain,
-		Timestamp: time.Now(),
-		CheckedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+	retryConfig := DefaultRetryConfig()
 
-	if !strings.HasPrefix(domain, "http://") && !strings.HasPrefix(domain, "https://") {
-		domain = "https://" + domain
-		result.URL = domain
-	}
+	var lastResult HealthCheckResult
 
-	result.IsSSL = strings.HasPrefix(domain, "https://")
+	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
 
-	req, err := http.NewRequestWithContext(ctx, "GET", domain, nil)
-	if err != nil {
-		result.Status = StatusDown
-		result.ErrorMessage = fmt.Sprintf("Failed to create request: %v", err)
-		m.logger.Error("Request creation failed",
-			zap.String("domain", result.Domain),
-			zap.Error(err))
-		return result
-	}
+		if err := m.config.RateLimiter.Wait(ctx); err != nil {
+			m.logger.Error("Rate limiter error",
+				zap.String("domain", domain),
+				zap.Error(err))
 
-	req.Header.Set("User-Agent", m.config.UserAgent)
+			return HealthCheckResult{
+				Domain:       domain,
+				URL:          domain,
+				Status:       StatusDown,
+				ErrorMessage: fmt.Sprintf("Rate limiter error: %v", err),
+				Timestamp:    time.Now(),
+				CheckedAt:    time.Now().UTC().Format(time.RFC3339),
+			}
+		}
 
-	startTime := time.Now()
-	resp, err := m.client.Do(req)
-	duration := time.Since(startTime)
-	result.ResponseTime = duration.Milliseconds()
+		// ========== Perform the health check ==========
+		result := HealthCheckResult{
+			Domain:    domain,
+			URL:       domain,
+			Timestamp: time.Now(),
+			CheckedAt: time.Now().UTC().Format(time.RFC3339),
+		}
 
-	if err != nil {
-		result.Status = StatusDown
-		result.ErrorMessage = fmt.Sprintf("Request failed: %v", err)
-		m.logger.Error("Request failed",
-			zap.String("domain", result.Domain),
-			zap.Error(err))
-		return result
-	}
-	defer resp.Body.Close()
+		checkURL := domain
+		if !strings.HasPrefix(domain, "http://") && !strings.HasPrefix(domain, "https://") {
+			checkURL = "https://" + domain
+			result.URL = checkURL
+		}
 
-	io.Copy(io.Discard, resp.Body)
+		result.IsSSL = strings.HasPrefix(checkURL, "https://")
 
-	result.StatusCode = resp.StatusCode
-	result.ContentLength = resp.ContentLength
+		req, err := http.NewRequestWithContext(ctx, "GET", checkURL, nil)
+		if err != nil {
+			result.Status = StatusDown
+			result.ErrorMessage = fmt.Sprintf("Failed to create request: %v", err)
+			lastResult = result
 
-	if result.IsSSL && resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
-		cert := resp.TLS.PeerCertificates[0]
-		result.SSLExpiry = cert.NotAfter.UTC().Format(time.RFC3339)
-		daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
-		result.SSLDaysLeft = daysLeft
+			if !IsRetryableError(err, 0) || attempt == retryConfig.MaxRetries {
+				m.logger.Error("Request creation failed",
+					zap.String("domain", result.Domain),
+					zap.Error(err))
+				return result
+			}
 
-		if daysLeft < SSLExpiryWarning {
-			m.logger.Warn("SSL certificate expiring soon",
-				zap.String("domain", result.Domain),
-				zap.Int("days_left", daysLeft))
+			backoff := retryConfig.CalculateBackoff(attempt)
+			m.logger.Warn("Request creation failed, retrying",
+				zap.String("domain", domain),
+				zap.Int("attempt", attempt+1),
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+
+			select {
+			case <-ctx.Done():
+				result.ErrorMessage = "Context cancelled during retry"
+				return result
+			case <-time.After(backoff):
+				continue
+			}
+		}
+
+		req.Header.Set("User-Agent", m.config.UserAgent)
+
+		startTime := time.Now()
+		resp, err := m.client.Do(req)
+		duration := time.Since(startTime)
+		result.ResponseTime = duration.Milliseconds()
+
+		if err != nil {
+			result.Status = StatusDown
+			result.ErrorMessage = fmt.Sprintf("Request failed: %v", err)
+			lastResult = result
+
+			if !IsRetryableError(err, 0) {
+				m.logger.Debug("Non-retryable error, stopping retries",
+					zap.String("domain", domain),
+					zap.Error(err))
+				return result
+			}
+
+			if attempt == retryConfig.MaxRetries {
+				m.logger.Warn("Max retries reached",
+					zap.String("domain", domain),
+					zap.Int("attempts", attempt+1))
+				return result
+			}
+
+			backoff := retryConfig.CalculateBackoff(attempt)
+			m.logger.Warn("Request failed, retrying",
+				zap.String("domain", domain),
+				zap.Int("attempt", attempt+1),
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+
+			select {
+			case <-ctx.Done():
+				result.ErrorMessage = "Context cancelled during retry"
+				return result
+			case <-time.After(backoff):
+				continue
+			}
+		}
+		defer resp.Body.Close()
+
+		io.Copy(io.Discard, resp.Body)
+
+		result.StatusCode = resp.StatusCode
+		result.ContentLength = resp.ContentLength
+
+		if result.IsSSL && resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+			cert := resp.TLS.PeerCertificates[0]
+			result.SSLExpiry = cert.NotAfter.UTC().Format(time.RFC3339)
+			daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
+			result.SSLDaysLeft = daysLeft
+
+			if daysLeft < SSLExpiryWarning {
+				m.logger.Warn("SSL certificate expiring soon",
+					zap.String("domain", result.Domain),
+					zap.Int("days_left", daysLeft))
+			}
+		}
+
+		result.Status = m.determineStatus(resp.StatusCode, result.ResponseTime)
+		lastResult = result
+
+		if result.Status == StatusUp {
+			if attempt > 0 {
+				m.logger.Info("Request succeeded after retry",
+					zap.String("domain", domain),
+					zap.Int("attempts", attempt+1))
+			} else {
+				m.logger.Info("Health check completed",
+					zap.String("domain", result.Domain),
+					zap.String("status", result.Status),
+					zap.Int("status_code", result.StatusCode),
+					zap.Int64("response_time_ms", result.ResponseTime))
+			}
+			return result
+		}
+
+		if !IsRetryableError(nil, result.StatusCode) {
+			m.logger.Debug("Non-retryable status code, stopping retries",
+				zap.String("domain", domain),
+				zap.Int("status_code", result.StatusCode))
+			return result
+		}
+
+		if attempt == retryConfig.MaxRetries {
+			m.logger.Warn("Max retries reached",
+				zap.String("domain", domain),
+				zap.Int("attempts", attempt+1),
+				zap.String("final_status", result.Status))
+			break
+		}
+
+		backoff := retryConfig.CalculateBackoff(attempt)
+		m.logger.Warn("Request returned non-success status, retrying",
+			zap.String("domain", domain),
+			zap.Int("attempt", attempt+1),
+			zap.Int("status_code", result.StatusCode),
+			zap.Duration("backoff", backoff),
+			zap.String("status", result.Status))
+
+		select {
+		case <-ctx.Done():
+			result.ErrorMessage = "Context cancelled during retry"
+			return result
+		case <-time.After(backoff):
+			// Continue to next attempt dont wait
 		}
 	}
 
-	result.Status = m.determineStatus(resp.StatusCode, result.ResponseTime)
-
-	m.logger.Info("Health check completed",
-		zap.String("domain", result.Domain),
-		zap.String("status", result.Status),
-		zap.Int("status_code", result.StatusCode),
-		zap.Int64("response_time_ms", result.ResponseTime))
-
-	return result
+	return lastResult
 }
 
+// determineStatus determines the status of a domain based on the response code and response time
 func (m *UptimeMonitor) determineStatus(statusCode int, responseTime int64) string {
 	switch {
 	case statusCode >= 200 && statusCode < 300:
@@ -225,10 +413,12 @@ func (m *UptimeMonitor) determineStatus(statusCode int, responseTime int64) stri
 	}
 }
 
+// RunCheck runs a health check on all domains in the configuration
 func (m *UptimeMonitor) RunCheck(ctx context.Context) (*MonitorReport, error) {
-	m.logger.Info("Starting uptime monitoring",
+	m.logger.Info("Starting uptime monitoring with rate limiting",
 		zap.Int("total_domains", len(m.config.Domains)),
-		zap.String("environment", m.config.Environment))
+		zap.String("environment", m.config.Environment),
+		zap.Float64("rate_limit", float64(RequestsPerSecond)))
 
 	results := make([]HealthCheckResult, len(m.config.Domains))
 	var wg sync.WaitGroup
@@ -299,8 +489,13 @@ func (m *UptimeMonitor) generateReport(results []HealthCheckResult) *MonitorRepo
 	}
 }
 
+// SaveReport saves the report to a file and sends an email if the directory creation fails.
 func (m *UptimeMonitor) SaveReport(report *MonitorReport) (string, error) {
 	if err := os.MkdirAll(m.config.OutputDir, 0755); err != nil {
+		m.logger.Error("Failed to create output directory, sending via email", zap.Error(err))
+		if emailErr := m.SendEmailOnFailure(report); emailErr != nil {
+			m.logger.Error("Failed to send email", zap.Error(emailErr))
+		}
 		return "", fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -309,10 +504,18 @@ func (m *UptimeMonitor) SaveReport(report *MonitorReport) (string, error) {
 
 	jsonData, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
+		m.logger.Error("Failed to marshal JSON, sending via email", zap.Error(err))
+		if emailErr := m.SendEmailOnFailure(report); emailErr != nil {
+			m.logger.Error("Failed to send email", zap.Error(emailErr))
+		}
 		return "", fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
 	if err := os.WriteFile(filename, jsonData, 0644); err != nil {
+		m.logger.Error("Failed to write file, sending via email", zap.Error(err))
+		if emailErr := m.SendEmailOnFailure(report); emailErr != nil {
+			m.logger.Error("Failed to send email", zap.Error(emailErr))
+		}
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -320,42 +523,187 @@ func (m *UptimeMonitor) SaveReport(report *MonitorReport) (string, error) {
 	return filename, nil
 }
 
+// SendEmailOnFailure sends report via email when JSON file creation fails
+func (m *UptimeMonitor) SendEmailOnFailure(jsonData interface{}) error {
+	if m.config.EmailAuth == "" || len(m.config.EmailTo) == 0 || m.config.EmailUser == "" {
+		m.logger.Debug("Email configuration not set, skipping email")
+		return nil
+	}
+
+	jsonBytes, err := json.MarshalIndent(jsonData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON data: %w", err)
+	}
+
+	subject := "Uptime Monitor Report Failed"
+
+	body := fmt.Sprintf(
+		"Failed to create JSON file for report\n\n"+
+			"The report data is attached below:\n\n"+
+			"=== BEGIN JSON DATA ===\n"+
+			"%s\n"+
+			"=== END JSON DATA ===\n",
+		string(jsonBytes),
+	)
+
+	var message []byte
+	message = fmt.Appendf(message, "From: Uptime Monitor <%s>\r\n", m.config.EmailUser)
+	message = fmt.Appendf(message, "To: %s\r\n", strings.Join(m.config.EmailTo, ","))
+	message = fmt.Appendf(message, "Subject: %s\r\n", subject)
+	message = fmt.Appendf(message, "MIME-Version: 1.0\r\n")
+	message = fmt.Appendf(message, "Content-Type: text/plain; charset=UTF-8\r\n")
+	message = fmt.Appendf(message, "\r\n")
+	message = fmt.Appendf(message, "%s\r\n", body)
+
+	auth := smtp.PlainAuth("", m.config.EmailUser, m.config.EmailAuth, m.config.SMTPHost)
+
+	err = smtp.SendMail(
+		m.config.SMTPHost+":"+m.config.SMTPPort,
+		auth,
+		m.config.EmailUser,
+		m.config.EmailTo,
+		message,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	m.logger.Info("Email sent with JSON data",
+		zap.Int("data_size", len(jsonBytes)),
+	)
+	return nil
+}
+
+// SubmitToAPI submits the monitoring report to external API with rate limiting and retries
 func (m *UptimeMonitor) SubmitToAPI(ctx context.Context, report *MonitorReport) error {
 	if m.config.APIURL == "" {
 		m.logger.Debug("API URL not configured, skipping submission")
 		return nil
 	}
 
-	jsonData, err := json.Marshal(report)
-	if err != nil {
-		return fmt.Errorf("failed to marshal report: %w", err)
+	retryConfig := DefaultRetryConfig()
+	var lastErr error
+
+	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
+		if err := m.config.RateLimiter.Wait(ctx); err != nil {
+			return fmt.Errorf("rate limiter error: %w", err)
+		}
+
+		jsonData, err := json.Marshal(report)
+		if err != nil {
+			return fmt.Errorf("failed to marshal report: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", m.config.APIURL, strings.NewReader(string(jsonData)))
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create API request: %w", err)
+
+			if attempt == retryConfig.MaxRetries {
+				m.logger.Error("Max retries reached for API submission",
+					zap.Int("attempts", attempt+1),
+					zap.Error(lastErr))
+				return fmt.Errorf("API submission failed after %d attempts: %w", retryConfig.MaxRetries+1, lastErr)
+			}
+
+			backoff := retryConfig.CalculateBackoff(attempt)
+			m.logger.Warn("Failed to create API request, retrying",
+				zap.Int("attempt", attempt+1),
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(backoff):
+				continue
+			}
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		if m.config.APIKey != "" {
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", m.config.APIKey))
+		}
+
+		resp, err := m.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to submit to API: %w", err)
+
+			if attempt == retryConfig.MaxRetries {
+				m.logger.Error("Max retries reached for API submission",
+					zap.Int("attempts", attempt+1),
+					zap.Error(lastErr))
+				return fmt.Errorf("API submission failed after %d attempts: %w", retryConfig.MaxRetries+1, lastErr)
+			}
+
+			backoff := retryConfig.CalculateBackoff(attempt)
+			m.logger.Warn("API submission failed, retrying",
+				zap.Int("attempt", attempt+1),
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(backoff):
+				continue
+			}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			body, _ := io.ReadAll(resp.Body)
+			lastErr = fmt.Errorf("API submission failed with status %d: %s", resp.StatusCode, string(body))
+
+			if !IsRetryableError(lastErr, resp.StatusCode) {
+				m.logger.Error("Non-retryable API error",
+					zap.Int("status_code", resp.StatusCode),
+					zap.String("response", string(body)))
+				return lastErr
+			}
+
+			// Retryable error (5xx or 429)
+			if attempt == retryConfig.MaxRetries {
+				m.logger.Error("Max retries reached for API submission",
+					zap.Int("attempts", attempt+1),
+					zap.Int("status_code", resp.StatusCode),
+					zap.Error(lastErr))
+				return fmt.Errorf("API submission failed after %d attempts: %w", retryConfig.MaxRetries+1, lastErr)
+			}
+
+			backoff := retryConfig.CalculateBackoff(attempt)
+			m.logger.Warn("API returned error status, retrying",
+				zap.Int("attempt", attempt+1),
+				zap.Int("status_code", resp.StatusCode),
+				zap.Duration("backoff", backoff))
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(backoff):
+				continue
+			}
+		}
+
+		if attempt > 0 {
+			m.logger.Info("API submission succeeded after retry",
+				zap.Int("attempts", attempt+1),
+				zap.String("url", m.config.APIURL),
+				zap.Int("status", resp.StatusCode))
+		} else {
+			m.logger.Info("Report submitted to API",
+				zap.String("url", m.config.APIURL),
+				zap.Int("status", resp.StatusCode))
+		}
+
+		return nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", m.config.APIURL, strings.NewReader(string(jsonData)))
-	if err != nil {
-		return fmt.Errorf("failed to create API request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if m.config.APIKey != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", m.config.APIKey))
-	}
-
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to submit to API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API submission failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	m.logger.Info("Report submitted to API", zap.String("url", m.config.APIURL), zap.Int("status", resp.StatusCode))
-	return nil
+	// the code should not reach here, but just in case nobody can guess
+	return fmt.Errorf("API submission failed after %d attempts: %w", retryConfig.MaxRetries+1, lastErr)
 }
 
+// SendNotifications sends notifications for the given report
 func (m *UptimeMonitor) SendNotifications(ctx context.Context, report *MonitorReport) {
 	if report.Downtime == 0 && report.Degraded == 0 {
 		m.logger.Debug("No issues detected, skipping notifications")
