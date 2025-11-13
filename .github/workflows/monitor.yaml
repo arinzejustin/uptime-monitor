@@ -2,7 +2,7 @@ name: Uptime Monitor
 
 on:
   schedule:
-    - cron: '* * * * */2'  # Runs Every 15 minutes
+    - cron: '* * * * */2'  # placeholder here
   workflow_dispatch:
   push:
     branches:
