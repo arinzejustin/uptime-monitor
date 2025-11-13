@@ -244,25 +244,14 @@ app.post(
   }
 );
 
-// === Dashboard Page ===
-app.get('/dashboard', async (c) => {
-  try {
-    const html = await visualizationPage();
-    return c.html(html);
-  } catch (error: any) {
-    console.error('Dashboard Load Error:', error);
-    return c.html('<h1>Dashboard Unavailable</h1><p>Please try again later.</p>', 500);
-  }
-});
-
 // === Dashboard Data (Protected) ===
 const dashboardQuerySchema = z.object({
   environment: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
-app.get(
-  '/dashboard/data',
+app.post(
+  '/api/v1/dashboard/data',
   validateApiKey,
   zValidator('query', dashboardQuerySchema),
   async (c) => {
