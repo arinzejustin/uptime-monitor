@@ -29,7 +29,7 @@ const (
 	SSLExpiryWarning = 30
 
 	DefaultTimeout    = 30 * time.Second
-	DefaultUserAgent  = "Axiolot-Uptime-Bot"
+	DefaultUserAgent  = "Monitoring Client/1.0"
 	DefaultConcurrent = 5
 
 	MaxRetries        = 3
@@ -75,7 +75,7 @@ type MonitorConfig struct {
 	APIURL         string
 	APIKey         string
 	Timeout        time.Duration
-	UserAgent      string // Axiolot-Uptime-bot
+	UserAgent      string // Monitor User-Agent
 	Concurrent     int
 	Environment    string
 	OutputDir      string

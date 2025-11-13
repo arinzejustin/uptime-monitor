@@ -17,10 +17,10 @@ import { fetchReports } from './src/fetchReports.ts';
 const PORT = Number(Bun.env.PORT || 3000);
 const NODE_ENV = Bun.env.NODE_ENV || 'development';
 const ALLOWED_ORIGINS = (Bun.env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim());
-const ALLOWED_USER_AGENT = Bun.env.ALLOWED_USER_AGENT || 'Axiolot-Uptime-Bot';
+const ALLOWED_USER_AGENT = Bun.env.ALLOWED_USER_AGENT || 'MonitoringClient/1.0';
 
 const rateLimiter = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 100; // requests per 15 minutes
+const RATE_LIMIT = 50; // requests per 15 minutes
 const RATE_WINDOW = 15 * 60 * 1000;
 
 const rateLimitMiddleware = async (c: any, next: () => Promise<void>) => {
@@ -315,19 +315,6 @@ const server = Bun.serve({
 console.log(`Server running on http://localhost:${PORT}`);
 console.log(`Environment: ${NODE_ENV}`);
 console.log(`CORS: ${ALLOWED_ORIGINS.join(', ')}`);
-
-// Handle shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  server.stop();
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Shutting down gracefully...');
-  server.stop();
-  process.exit(0);
-});
 
 export default {
   port: PORT,
