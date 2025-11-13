@@ -14,7 +14,6 @@ import { visualizationPage } from './src/visualization';
 import { fetchReports } from './src/fetchReports.ts';
 
 // Environment
-const PORT = Number(Bun.env.PORT || 3000);
 const NODE_ENV = Bun.env.NODE_ENV || 'development';
 const ALLOWED_ORIGINS = (Bun.env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim());
 const ALLOWED_USER_AGENT = Bun.env.ALLOWED_USER_AGENT || 'MonitoringClient/1.0';
@@ -306,17 +305,5 @@ app.onError((err, c) => {
   );
 });
 
-// Graceful Shutdown
-const server = Bun.serve({
-  port: PORT,
-  fetch: app.fetch,
-});
 
-console.log(`Server running on http://localhost:${PORT}`);
-console.log(`Environment: ${NODE_ENV}`);
-console.log(`CORS: ${ALLOWED_ORIGINS.join(', ')}`);
-
-export default {
-  port: PORT,
-  fetch: app.fetch,
-};
+export default app;

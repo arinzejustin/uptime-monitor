@@ -148,8 +148,16 @@ func IsRetryableError(err error, statusCode int) bool {
 
 func NewMonitorConfig() (*MonitorConfig, error) {
 	domainsStr := os.Getenv("MONITOR_DOMAINS")
+	supabaseUrl := os.Getenv("SUPABASE_URL")
+	supabaseKey := os.Getenv("SUPABASE_KEY")
+	apiUrl := os.Getenv("API_URL")
+
 	if domainsStr == "" {
 		return nil, fmt.Errorf("MONITOR_DOMAINS environment variable not set")
+	}
+
+	if supabaseUrl == "" || supabaseKey == "" || apiUrl == "" {
+		return nil, fmt.Errorf("SUPABASE_URL, SUPABASE_KEY, or API_URL environment variable not set")
 	}
 
 	domains := strings.Split(domainsStr, ",")
