@@ -1,5 +1,5 @@
 {
-  "name": "server",
+  "name": "uptime-monitor-server",
   "module": "index.ts",
   "type": "module",
   "private": true,
@@ -15,5 +15,16 @@
     "date-fns": "^4.1.0",
     "hono": "^4.10.5",
     "zod": "^4.1.12"
+  },
+  "scripts": {
+    "dev": "bun --watch index.ts",
+    "start": "bun index.ts",
+    "prod": "bun run index.ts",
+    "build": "bun build index.ts --compile --outfile dist/server",
+    "setup-db": "bun run scripts/setup-db.ts",
+    "check:bun": "bun --version"
+  },
+  "bun": {
+    "sha1": "b5cb32bb4c8827c0e8f0f5b57aaeef4cce45e33e"
   }
 }

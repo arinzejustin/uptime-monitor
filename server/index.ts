@@ -11,17 +11,21 @@ import { validateApiKey } from './src/apiKeyValidator';
 import { submitReport } from './src/submitEndpoint';
 import { fetchVisualization } from './src/visualData';
 import { fetchReports } from './src/fetchReports.ts';
+import { currentStatus } from './src/currentStatus';
 
-// Environment
 const NODE_ENV = Bun.env.NODE_ENV || 'development';
 const ALLOWED_USER_AGENT = Bun.env.ALLOWED_USER_AGENT || 'MonitoringClient/1.0';
 
 const rateLimiter = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 50; // requests per 15 minutes
+const RATE_LIMIT = 50;
 const RATE_WINDOW = 15 * 60 * 1000;
 
 const rateLimitMiddleware = async (c: any, next: () => Promise<void>) => {
-  const ip = c.req.header('x-forwarded-for') || 'unknown';
+  const forwarded = c.req.header('x-forwarded-for');
+  const ip = forwarded
+    ? forwarded.split(',')[0].trim()
+    : c.req.header('cf-connecting-ip') || 'unknown';
+
   const now = Date.now();
   const record = rateLimiter.get(ip);
 
@@ -34,8 +38,8 @@ const rateLimitMiddleware = async (c: any, next: () => Promise<void>) => {
     rateLimiter.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
   }
 
-  if (rateLimiter.size > 10_000) {
-    for (const [key, val] of rateLimiter.entries()) {
+  if (rateLimiter.size > 10_000 && Math.random() < 0.05) {
+    for (const [key, val] of rateLimiter) {
       if (val.resetAt < now) rateLimiter.delete(key);
     }
   }
@@ -45,7 +49,6 @@ const rateLimitMiddleware = async (c: any, next: () => Promise<void>) => {
 
 const app = new Hono();
 
-// Global Middlewares
 app.use('*', logger());
 app.use('*', timing());
 app.use('*', secureHeaders());
@@ -81,7 +84,7 @@ app.post(
   '/api/v1/keys/generate',
   zValidator('json', generateKeySchema),
   async (c) => {
-    if (NODE_ENV !== "development") {
+    if (NODE_ENV !== 'development') {
       return c.json({ error: 'Unauthorized. Can\'t generate API key in production mode' }, 401);
     }
     try {
@@ -97,7 +100,7 @@ app.post(
         201
       );
     } catch (error: any) {
-      console.error('Generate API Key Error:', error);
+      console.error('Generate API Key Error:', error.stack || error);
       return c.json(
         { error: 'Failed to generate API key', message: error.message },
         500
@@ -121,7 +124,7 @@ app.get('/api/v1/keys/:keyId', async (c) => {
 
     return c.json({ success: true, data: keyInfo });
   } catch (error: any) {
-    console.error('Fetch API Key Error:', error);
+    console.error('Fetch API Key Error:', error.stack || error);
     return c.json(
       { error: 'Failed to fetch API key info', message: error.message },
       500
@@ -137,12 +140,11 @@ app.post(
   async (c) => {
     try {
       const userAgent = c.req.header('User-Agent');
-      if (userAgent !== ALLOWED_USER_AGENT) {
+
+      // Optimized & safer
+      if (!userAgent?.startsWith(ALLOWED_USER_AGENT)) {
         return c.json(
-          {
-            error: 'Forbidden',
-            message: 'Invalid User-Agent header'
-          },
+          { error: 'Forbidden', message: 'Invalid User-Agent header' },
           403
         );
       }
@@ -178,12 +180,12 @@ const querySchema = z.object({
   environment: z.string().optional(),
   url: z.string().url().optional(),
   status: z.enum(['up', 'down']).optional(),
-  from: z.coerce.string().optional(),
-  to: z.coerce.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
   sortBy: z.string().optional(),
-  sortOrder: z.enum(['asc', 'desc']).optional()
+  sortOrder: z.enum(['asc', 'desc']).optional(),
 });
 
 app.post(
@@ -201,7 +203,7 @@ app.post(
         pagination: result.pagination,
       });
     } catch (error: any) {
-      console.error('Query Reports Error:', error);
+      console.error('Query Reports Error:', error.stack || error);
       return c.json(
         { error: 'Failed to fetch reports', message: error.message },
         500
@@ -212,14 +214,15 @@ app.post(
 
 const summaryQuerySchema = z.object({
   domains: z.array(z.string().url()).optional(),
-  limit: z.coerce.number().int().min(1).max(1000).default(100).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(100),
   days: z.coerce.number().int().min(1).max(31).default(30),
   useCache: z.boolean().default(true),
 });
 
 app.post(
   '/api/v1/reports/query/summary',
-  validateApiKey, zValidator('json', summaryQuerySchema),
+  validateApiKey,
+  zValidator('json', summaryQuerySchema),
   async (c) => {
     try {
       const query = c.req.valid('json');
@@ -235,7 +238,7 @@ app.post(
         data: result,
       });
     } catch (error: any) {
-      console.error('Fetch Summary Error:', error);
+      console.error('Fetch Summary Error:', error.stack || error);
       return c.json(
         { error: 'Failed to fetch summary', message: error.message },
         500
@@ -244,7 +247,40 @@ app.post(
   }
 );
 
-// === Dashboard Data (Protected) ===
+const concurrentQuerySchema = z.object({
+  domains: z.string().min(1),
+});
+
+app.post(
+  '/api/v1/concurrent/status',
+  validateApiKey,
+  zValidator('json', concurrentQuerySchema),
+  async (c) => {
+    try {
+      const query = c.req.valid('json');
+
+      const result = await currentStatus({
+        domains: query.domains
+          .split(',')
+          .map(d => d.trim())
+          .filter(Boolean),
+      });
+
+      return c.json({
+        success: true,
+        message: result.message,
+        data: result.statusResults,
+      });
+    } catch (error: any) {
+      return c.json(
+        { error: 'Failed to fetch concurrent status', message: error.message },
+        500
+      );
+    }
+  }
+);
+
+// Dashboard Data
 const dashboardQuerySchema = z.object({
   environment: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -265,7 +301,7 @@ app.post(
 
       return c.json(result);
     } catch (error: any) {
-      console.error('Dashboard Data Error:', error);
+      console.error('Dashboard Data Error:', error.stack || error);
       return c.json({ error: 'Failed to fetch dashboard data' }, 500);
     }
   }
@@ -284,7 +320,7 @@ app.notFound((c) => {
 
 // Global Error Handler
 app.onError((err, c) => {
-  console.error('Unhandled Error:', err);
+  console.error('Unhandled Error:', err.stack || err);
   return c.json(
     {
       error: 'Internal Server Error',
@@ -293,6 +329,5 @@ app.onError((err, c) => {
     500
   );
 });
-
 
 export default app;
