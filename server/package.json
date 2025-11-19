@@ -21,7 +21,7 @@
     "dev": "bun --watch index.ts",
     "start": "bun index.ts",
     "prod": "bun run index.ts",
-    "build": "bun build index.ts --compile --outfile dist/server",
+    "build": "echo 'No build step required for vercel deployment.'",
     "setup-db": "bun run scripts/setup-db.ts",
     "check:bun": "bun --version"
   },
