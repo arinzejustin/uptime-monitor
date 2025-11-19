@@ -3,11 +3,10 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
-import { handle } from '@hono/node-server/vercel'
 import { timing } from 'hono/timing';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import { generateApiKey, getApiKeyInfo } from './components/apiKeyGenerator.ts.ts';
+import { generateApiKey, getApiKeyInfo } from './components/apiKeyGenerator.ts';
 import { validateApiKey } from './components/apiKeyValidator.ts';
 import { submitReport } from './components/submitEndpoint.ts';
 import { fetchVisualization } from './components/visualData.ts';
@@ -333,4 +332,4 @@ app.onError((err, c) => {
   );
 });
 
-export default handle(app);
+export default app;
