@@ -6,12 +6,12 @@ import { secureHeaders } from 'hono/secure-headers';
 import { timing } from 'hono/timing';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import { generateApiKey, getApiKeyInfo } from './components/apiKeyGenerator.ts';
-import { validateApiKey } from './components/apiKeyValidator.ts';
-import { submitReport } from './components/submitEndpoint.ts';
-import { fetchVisualization } from './components/visualData.ts';
-import { fetchReports } from './components/fetchReports.ts';
-import { currentStatus } from './components/currentStatus.ts';
+import { generateApiKey, getApiKeyInfo } from './src/components/apiKeyGenerator';
+import { validateApiKey } from './src/components/apiKeyValidator';
+import { submitReport } from './src/components/submitEndpoint';
+import { fetchVisualization } from './src/components/visualData';
+import { fetchReports } from './src/components/fetchReports';
+import { currentStatus } from './src/components/currentStatus';
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const ALLOWED_USER_AGENT = process.env.ALLOWED_USER_AGENT || 'MonitoringClient/1.0';
