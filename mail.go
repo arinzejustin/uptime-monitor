@@ -1,17 +1,10 @@
 package main
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
-
-	supa_storage "github.com/supabase-community/storage-go"
-	"github.com/wcharczuk/go-chart/v2"
-	"github.com/wcharczuk/go-chart/v2/drawing"
 )
 
 func BuildHTMLReport(report *MonitorReport, subject string) (string, error) {
@@ -159,67 +152,6 @@ pre {
 	return html, nil
 }
 
-func generateUptimeChart(report *MonitorReport) (string, error) {
-	Colors := []drawing.Color{
-		drawing.ColorGreen,
-		drawing.ColorRed,
-		drawing.ColorYellow,
-	}
-
-	graph := chart.BarChart{
-		Title: "Uptime Overview Report",
-		TitleStyle: chart.Style{
-			FontSize:  16,
-			FontColor: drawing.ColorFromHex("2f2e41"),
-		},
-		Background: chart.Style{
-			Padding: chart.Box{
-				Top:    40,
-				Left:   20,
-				Right:  20,
-				Bottom: 20,
-			},
-			FillColor: drawing.ColorWhite,
-		},
-		Width:    800,
-		Height:   400,
-		BarWidth: 80,
-		Bars: []chart.Value{
-			{
-				Value: float64(report.Uptime),
-				Label: "Uptime",
-				Style: chart.Style{FillColor: Colors[0], FontSize: 8, FontColor: Colors[0]}},
-			{
-				Value: float64(report.Downtime),
-				Label: "Downtime",
-				Style: chart.Style{FillColor: Colors[1], FontSize: 8, FontColor: Colors[1]}},
-			{
-				Value: float64(report.Degraded),
-				Label: "Degraded",
-				Style: chart.Style{FillColor: Colors[2], FontSize: 8, FontColor: Colors[2]}},
-		},
-		XAxis: chart.Style{
-			FontSize: 10,
-		},
-		YAxis: chart.YAxis{
-			Name: "Powered By Axiolot Hub",
-			Style: chart.Style{
-				FontSize: 8,
-			},
-		},
-		Canvas: chart.Style{
-			FillColor: drawing.ColorFromHex("f8f9fa"),
-		},
-	}
-
-	var buf bytes.Buffer
-	err := graph.Render(chart.PNG, &buf)
-	if err != nil {
-		return "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
-}
 
 func buildResultsTable(results []HealthCheckResult) string {
 	rows := ""
@@ -241,43 +173,4 @@ func buildResultsTable(results []HealthCheckResult) string {
 </tr>`, r.Domain, statusClass, strings.ToUpper(r.Status), r.StatusCode, r.ResponseTime, r.SSLExpiry, r.CheckedAt)
 	}
 	return rows
-}
-
-func storageChartImage(chartBase64 string) (string, error) {
-	supabaseURL := os.Getenv("SUPABASE_URL")
-	supabaseKey := os.Getenv("SUPABASE_KEY")
-	bucket := "uptime-charts"
-
-	if supabaseURL == "" || supabaseKey == "" {
-		return "", fmt.Errorf("missing SUPABASE_URL or SUPABASE_KEY environment variables")
-	}
-
-	projectURL := fmt.Sprintf("%s/storage/v1", supabaseURL)
-	storageClient := supa_storage.NewClient(projectURL, supabaseKey, nil)
-
-	_, err := storageClient.GetBucket(bucket)
-	if err != nil {
-		_, err := storageClient.CreateBucket(bucket, supa_storage.BucketOptions{
-			Public: true,
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to create bucket: %w", err)
-		}
-	}
-
-	data, err := base64.StdEncoding.DecodeString(chartBase64)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode chart image: %w", err)
-	}
-
-	dateFolder := time.Now().Format("2006-01-02")
-	filename := fmt.Sprintf("charts/%s/report_%d.png", dateFolder, time.Now().Unix())
-
-	_, err = storageClient.UploadFile(bucket, filename, bytes.NewReader(data))
-	if err != nil {
-		return "", fmt.Errorf("failed to upload chart: %w", err)
-	}
-
-	publicURL := storageClient.GetPublicUrl(bucket, filename)
-	return publicURL.SignedURL, nil
 }

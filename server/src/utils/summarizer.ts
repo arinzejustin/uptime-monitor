@@ -28,7 +28,7 @@ export function summarizeDomainData(records: any[], domains?: string[]) {
         for (const [dateKey, checks] of Object.entries(dailyData)) {
             const downChecks = checks.filter((c) => c.status === "down");
             const downCount = downChecks.length;
-            const avgIntervalMinutes = 30; // Depending on monitoring frequency
+            const avgIntervalMinutes = 10; // Depending on monitoring frequency
             const downMinutes = downCount * avgIntervalMinutes;
             const hours = Math.floor(downMinutes / 60);
             const minutes = downMinutes % 60;
@@ -40,7 +40,7 @@ export function summarizeDomainData(records: any[], domains?: string[]) {
             let title = "Operational";
             let description = "No issues recorded today";
 
-            if (downCount >= 15) {
+            if (downCount >= 60) {
                 status = "error";
                 title = "Major Outage";
                 description = `${domain} experienced extended downtime (${timeDown}).`;

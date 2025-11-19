@@ -14,18 +14,13 @@ export const currentStatus = async (params: { domains: string[] }) => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            const response = await fetch(url, {
+            await fetch(url, {
                 method: "HEAD",
+                redirect: "follow",
                 signal: controller.signal
             });
 
             clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                statusResults[domain] = "Down";
-                messages.push(`${domain} is down`);
-                continue;
-            }
 
             statusResults[domain] = "Up";
         } catch (error) {

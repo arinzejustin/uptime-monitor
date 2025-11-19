@@ -1,5 +1,5 @@
 import { supabase, REPORTS_TABLE } from '../config/config';
-import type { MonitorReport } from '../types';
+import type { MonitorReport } from '../../types';
 
 export async function submitReport(report: MonitorReport) {
     if (!report.service || !report.environment) {
@@ -14,7 +14,7 @@ export async function submitReport(report: MonitorReport) {
         throw new Error('results array must not be empty');
     }
 
-    const domains = report.results.map((r) => r.domain).filter(Boolean);
+    // const domains = report.results.map((r) => r.domain).filter(Boolean);
 
     const payload = {
         service: report.service,
@@ -27,7 +27,6 @@ export async function submitReport(report: MonitorReport) {
         average_latency_ms: report.average_latency_ms,
         timestamp: report.timestamp || new Date().toISOString(),
         results: report.results,
-        domains,
     };
 
     const { data, error } = await supabase

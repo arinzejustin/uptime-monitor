@@ -1,10 +1,10 @@
 import { randomBytes, createHash } from 'crypto';
-import { supabase, API_KEYS_TABLE } from '../config/config';
+import { supabase, API_KEY_TABLE } from '../config/config';
 
 
 const checkKeyExist = async () => {
     const { data, error } = await supabase
-        .from(API_KEYS_TABLE)
+        .from(API_KEY_TABLE)
         .select('id')
         .limit(1);
 
@@ -25,7 +25,7 @@ export async function generateApiKey(name: string, description?: string) {
 
     // Store in database
     const { data, error } = await supabase
-        .from(API_KEYS_TABLE)
+        .from(API_KEY_TABLE)
         .insert({
             name,
             description,
@@ -54,7 +54,7 @@ export async function generateApiKey(name: string, description?: string) {
 
 export async function getApiKeyInfo(keyId: string) {
     const { data, error } = await supabase
-        .from(API_KEYS_TABLE)
+        .from(API_KEY_TABLE)
         .select('id, name, description, key_prefix, is_active, created_at, last_used_at, usage_count')
         .eq('id', keyId)
         .single();
@@ -64,11 +64,11 @@ export async function getApiKeyInfo(keyId: string) {
 }
 
 export async function updateKeyUsage(keyHash: string) {
-    await supabase
-        .from(API_KEYS_TABLE)
-        .update({
-            last_used_at: new Date().toISOString(),
-            usage_count: supabase.rpc('increment_usage_count')
-        })
-        .eq('key_hash', keyHash);
+    const { error } = await supabase.rpc("increment_key_usage", {
+        key_hash: keyHash
+    });
+
+    if (error) {
+        console.error("Failed to update key usage:", error);
+    }
 }

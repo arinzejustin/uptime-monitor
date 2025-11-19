@@ -1,5 +1,5 @@
 import { supabase, SUMMARY_TABLE } from "../config/config";
-import type { DailySummary } from "../types";
+import type { DailySummary } from "../../types";
 
 export async function getCachedSummaries(domains: string[], days: number) {
     const sinceDate = new Date();
@@ -14,20 +14,27 @@ export async function getCachedSummaries(domains: string[], days: number) {
     if (error) {
         return [];
     }
-    return data || [];
+
+    return (data || []).map(item => ({
+        ...item,
+        time_down: item.time_down || '0m'
+    }));
 }
 
 export async function saveSummariesToCache(summaries: Record<string, DailySummary[]>) {
     const toInsert = [];
     for (const [domain, records] of Object.entries(summaries)) {
         for (const rec of records) {
+            const timeDownInterval = convertToPostgresInterval(rec.time_down);
+
             toInsert.push({
                 domain,
                 date: rec.date,
                 status: rec.status,
                 title: rec.title,
                 description: rec.description,
-                time_down: rec.time_down,
+                time_down: timeDownInterval,
+                total_downtime: calculateTotalMinutes(rec.time_down),
                 updated_at: new Date().toISOString()
             });
         }
@@ -42,4 +49,30 @@ export async function saveSummariesToCache(summaries: Record<string, DailySummar
     } else {
         console.log(`✅ Cached ${toInsert.length} summaries to Supabase`);
     }
+}
+
+function convertToPostgresInterval(timeDown: string): string {
+    const hourMatch = timeDown.match(/(\d+)h/);
+    const minMatch = timeDown.match(/(\d+)m/);
+
+    const hours = hourMatch ? parseInt(hourMatch[1] || "0") : 0;
+    const minutes = minMatch ? parseInt(minMatch[1] || "0") : 0;
+
+    if (hours > 0 && minutes > 0) {
+        return `${hours} hours ${minutes} minutes`;
+    } else if (hours > 0) {
+        return `${hours} hours`;
+    } else {
+        return `${minutes} minutes`;
+    }
+}
+
+function calculateTotalMinutes(timeDown: string): number {
+    const hourMatch = timeDown.match(/(\d+)h/);
+    const minMatch = timeDown.match(/(\d+)m/);
+
+    const hours = hourMatch ? parseInt(hourMatch[1] || "0") : 0;
+    const minutes = minMatch ? parseInt(minMatch[1] || "0") : 0;
+
+    return (hours * 60) + minutes;
 }

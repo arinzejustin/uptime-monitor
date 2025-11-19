@@ -3,18 +3,19 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
+import { handle } from '@hono/node-server/vercel'
 import { timing } from 'hono/timing';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import { generateApiKey, getApiKeyInfo } from './src/apiKeyGenerator.ts';
-import { validateApiKey } from './src/apiKeyValidator';
-import { submitReport } from './src/submitEndpoint';
-import { fetchVisualization } from './src/visualData';
-import { fetchReports } from './src/fetchReports.ts';
-import { currentStatus } from './src/currentStatus';
+import { generateApiKey, getApiKeyInfo } from './components/apiKeyGenerator.ts.ts';
+import { validateApiKey } from './components/apiKeyValidator.ts';
+import { submitReport } from './components/submitEndpoint.ts';
+import { fetchVisualization } from './components/visualData.ts';
+import { fetchReports } from './components/fetchReports.ts';
+import { currentStatus } from './components/currentStatus.ts';
 
-const NODE_ENV = Bun.env.NODE_ENV || 'development';
-const ALLOWED_USER_AGENT = Bun.env.ALLOWED_USER_AGENT || 'MonitoringClient/1.0';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const ALLOWED_USER_AGENT = process.env.ALLOWED_USER_AGENT || 'MonitoringClient/1.0';
 
 const rateLimiter = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT = 50;
@@ -59,10 +60,11 @@ app.use(
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'X-Key-Header'],
     exposeHeaders: ['Content-Length'],
-    maxAge: 600,
+    maxAge: 0,
     credentials: true,
   })
 );
+
 
 // Health Check
 app.get('/health', (c) => {
@@ -213,15 +215,16 @@ app.post(
 );
 
 const summaryQuerySchema = z.object({
-  domains: z.array(z.string().url()).optional(),
-  limit: z.coerce.number().int().min(1).max(1000).default(100),
-  days: z.coerce.number().int().min(1).max(31).default(30),
+  domains: z.array(z.string()),
+  limit: z.coerce.number().int().min(1).max(1000).default(1000),
+  days: z.coerce.number().int().min(1).max(60).default(60),
   useCache: z.boolean().default(true),
 });
 
 app.post(
   '/api/v1/reports/query/summary',
   validateApiKey,
+  rateLimitMiddleware,
   zValidator('json', summaryQuerySchema),
   async (c) => {
     try {
@@ -235,10 +238,10 @@ app.post(
 
       return c.json({
         success: true,
+        message: 'Fetched summary successfully',
         data: result,
       });
     } catch (error: any) {
-      console.error('Fetch Summary Error:', error.stack || error);
       return c.json(
         { error: 'Failed to fetch summary', message: error.message },
         500
@@ -330,4 +333,4 @@ app.onError((err, c) => {
   );
 });
 
-export default app;
+export default handle(app);

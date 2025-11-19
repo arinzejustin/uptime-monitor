@@ -18,18 +18,31 @@ export async function fetchReports(query: {
         }
     }
 
-    // Fetch fresh data
     const sinceDate = new Date();
     sinceDate.setDate(sinceDate.getDate() - days);
 
-    const { data, error } = await supabase
+    let supabaseQuery = supabase
         .from(REPORTS_TABLE)
         .select("timestamp, results")
         .gte("timestamp", sinceDate.toISOString())
-        .order("timestamp", { ascending: true })
-        .limit(query.limit || 1000);
+        .order("timestamp", { ascending: true });
+
+    if (domains.length > 0) {
+        domains.map(domain => ({
+            domain: domain
+        }));
+
+        supabaseQuery = supabaseQuery.or(
+            domains.map(domain =>
+                `results.cs.${JSON.stringify([{ domain }])}`
+            ).join(',')
+        );
+    }
+
+    const { data, error } = await supabaseQuery.limit(query.limit || 1000);
 
     if (error) {
+        console.log(error)
         throw new Error(`Failed to fetch reports: ${error.message}`);
     }
 
