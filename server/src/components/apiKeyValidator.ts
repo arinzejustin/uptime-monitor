@@ -1,7 +1,7 @@
 import type { Context, Next } from 'hono';
 import { supabase, API_KEY_TABLE } from '../config/config.ts';
 import { createHash } from 'crypto';
-import { updateKeyUsage } from './apiKeyGenerator.ts.ts';
+import { updateKeyUsage } from './apiKeyGenerator.ts';
 
 
 export async function validateApiKey(c: Context, next: Next) {
