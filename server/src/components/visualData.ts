@@ -1,5 +1,5 @@
-import { supabase, REPORTS_TABLE } from '../config/config';
-import type { QueryInput } from '../../types';
+import { supabase, REPORTS_TABLE } from '../config/config.js';
+import type { QueryInput } from '../../types.js';
 
 export async function fetchVisualization(query: QueryInput) {
     let supabaseQuery = supabase

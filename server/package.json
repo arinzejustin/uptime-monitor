@@ -1,6 +1,6 @@
 {
   "name": "uptime-monitor-server",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
@@ -18,9 +18,9 @@
     "zod": "^4.1.12"
   },
   "scripts": {
-    "dev": "bun --watch index.ts",
-    "start": "bun index.ts",
-    "prod": "bun run index.ts",
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "prod": "bun run src/index.ts",
     "build": "echo 'No build step required for vercel deployment.'",
     "setup-db": "bun run scripts/setup-db.ts",
     "check:bun": "bun --version"

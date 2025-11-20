@@ -1,7 +1,7 @@
 import type { Context, Next } from 'hono';
-import { supabase, API_KEY_TABLE } from '../config/config.ts';
+import { supabase, API_KEY_TABLE } from '../config/config.js';
 import { createHash } from 'crypto';
-import { updateKeyUsage } from './apiKeyGenerator.ts';
+import { updateKeyUsage } from './apiKeyGenerator.js';
 
 
 export async function validateApiKey(c: Context, next: Next) {
@@ -32,10 +32,8 @@ export async function validateApiKey(c: Context, next: Next) {
         }, 401);
     }
 
-    // Hash the provided key
     const hashedKey = createHash('sha256').update(apiKey).digest('hex');
 
-    // Check database
     const { data, error } = await supabase
         .from(API_KEY_TABLE)
         .select('id, name, is_active, rate_limit')

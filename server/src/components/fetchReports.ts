@@ -1,6 +1,6 @@
-import { supabase, REPORTS_TABLE } from "../config/config";
-import { summarizeDomainData } from "../utils/summarizer";
-import { getCachedSummaries, saveSummariesToCache } from "../utils/cacheSummary";
+import { supabase, REPORTS_TABLE } from "../config/config.js";
+import { summarizeDomainData } from "../utils/summarizer.js";
+import { getCachedSummaries, saveSummariesToCache } from "../utils/cacheSummary.js";
 
 export async function fetchReports(query: {
     domains?: string[];

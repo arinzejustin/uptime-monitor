@@ -1,5 +1,5 @@
-import { supabase, REPORTS_TABLE } from '../config/config';
-import type { MonitorReport } from '../../types';
+import { supabase, REPORTS_TABLE } from '../config/config.js';
+import type { MonitorReport } from '../../types.js';
 
 export async function submitReport(report: MonitorReport) {
     if (!report.service || !report.environment) {
@@ -7,7 +7,7 @@ export async function submitReport(report: MonitorReport) {
     }
 
     if (report.uptime_percent < 0 || report.uptime_percent > 100) {
-        throw new Error('uptime_percent must be between 0 and 100');
+        throw new Error('uptime_percent must be betwe.jsen 0 and 100');
     }
 
     if (!Array.isArray(report.results) || report.results.length === 0) {

@@ -1,4 +1,4 @@
-import { supabase } from "../config/config";
+import { supabase } from "../config/config.js";
 
 try {
   const sqlfile = Bun.file("./schema.sql");

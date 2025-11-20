@@ -1,5 +1,5 @@
 import { randomBytes, createHash } from 'crypto';
-import { supabase, API_KEY_TABLE } from '../config/config';
+import { supabase, API_KEY_TABLE } from '../config/config.js';
 
 
 const checkKeyExist = async () => {

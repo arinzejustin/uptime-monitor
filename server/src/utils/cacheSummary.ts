@@ -1,5 +1,5 @@
-import { supabase, SUMMARY_TABLE } from "../config/config";
-import type { DailySummary } from "../../types";
+import { supabase, SUMMARY_TABLE } from "../config/config.js";
+import type { DailySummary } from "../../types.js";
 
 export async function getCachedSummaries(domains: string[], days: number) {
     const sinceDate = new Date();
