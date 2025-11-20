@@ -344,7 +344,8 @@ app.notFound((c) => {
   try {
     const html = readFileSync(join(process.cwd(), 'public', '404.html'), 'utf-8');
     return c.html(html);
-  } catch {
+  } catch(error) {
+    console.log(error)
     return c.json(
       {
         error: 'Not Found',
