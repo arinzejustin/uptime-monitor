@@ -135,7 +135,7 @@ app.post(
   zValidator('json', generateKeySchema),
   async (c) => {
     if (NODE_ENV !== 'development') {
-      return c.json({ error: 'Unauthorized. Can\'t generate API key in production mode' }, 401);
+      return c.json({ message: 'Unauthorized. Can\'t generate API key in production mode' }, 401);
     }
     try {
       const { name, description } = c.req.valid('json');
@@ -353,7 +353,7 @@ app.post(
       return c.json(result);
     } catch (error: any) {
       console.error('Dashboard Data Error:', error.stack || error);
-      return c.json({ error: 'Failed to fetch dashboard data' }, 500);
+      return c.json({ error: 'Failed to fetch dashboard data', message: error.message }, 500);
     }
   }
 );
@@ -362,7 +362,7 @@ app.notFound((c) => {
   try {
     const html = readFileSync(join(__dirname, '..', 'public', '404.html'), 'utf-8');
     return c.html(html);
-  } catch (error) {
+  } catch (error: any) {
     console.log(error)
     return c.json(
       {

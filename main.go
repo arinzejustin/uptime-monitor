@@ -7,14 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"github.com/joho/godotenv"
 )
-
-func init() {
-	if err := godotenv.Load(); err != nil {
-		fmt.Println("No .env file found")
-	}
-}
 
 func main() {
 	subject := "Failed trying to submit the report to API"
