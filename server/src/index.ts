@@ -67,6 +67,31 @@ const serveStaticFile = (filePath: string, contentType: string) => {
   };
 };
 
+const serveAppFile = (c: any) => {
+  try {
+    const path = c.req.path.replace('/app/', '');
+    const filePath = join(__dirname, '..', 'public', 'app', path);
+    const content = readFileSync(filePath);
+
+    const ext = path.split('.').pop()?.toLowerCase();
+    const contentTypes: Record<string, string> = {
+      'js': 'application/javascript',
+      'css': 'text/css',
+      'json': 'application/json',
+    };
+
+    const contentType = contentTypes[ext || ''] || 'application/octet-stream';
+
+    return new Response(content, {
+      headers: { 'Content-Type': contentType }
+    });
+  } catch (e) {
+    console.error('App file not found:', c.req.path, e);
+    return c.notFound();
+  }
+};
+
+
 const app = new Hono();
 
 app.use('*', logger());
@@ -84,8 +109,9 @@ app.use(
   })
 );
 
+app.get('/app/*', serveAppFile);
 app.get('/favicon.ico', serveStaticFile('favicon.ico', 'image/x-icon'));
-app.get('/dashboard', serveStaticFile('dashboard.html', 'text/html'));
+app.get('/', serveStaticFile('dashboard.html', 'text/html'));
 
 
 // Health Check
