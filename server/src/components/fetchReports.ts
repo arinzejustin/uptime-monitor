@@ -10,8 +10,10 @@ export async function fetchReports(query: {
 }) {
     const days = query.days || 60;
     const domains = query.domains || [];
+    console.log(query.useCache, query.limit, query.days, JSON.stringify(query.domains))
 
     if (query.useCache && domains.length > 0) {
+        console.log('using cache')
         const cached = await getCachedSummaries(domains, days);
         if (cached.length > 0) {
             return groupByDomain(cached);

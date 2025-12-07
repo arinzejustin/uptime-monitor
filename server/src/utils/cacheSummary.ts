@@ -11,9 +11,13 @@ export async function getCachedSummaries(domains: string[], days: number) {
         .in("domain", domains)
         .gte("date", sinceDate.toISOString().slice(0, 10));
 
+
     if (error) {
+        console.log(error)
         return [];
     }
+
+    console.log(data)
 
     return (data || []).map(item => ({
         ...item,
@@ -47,7 +51,7 @@ export async function saveSummariesToCache(summaries: Record<string, DailySummar
     if (error) {
         console.error("Cache save error:", error);
     } else {
-        console.log(`✅ Cached ${toInsert.length} summaries to Supabase`);
+        console.log(`Cached ${toInsert.length} summaries to Supabase`);
     }
 }
 
