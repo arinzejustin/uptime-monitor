@@ -63,5 +63,7 @@ export function summarizeDomainData(records: any[], domains?: string[]) {
         summaries[domain] = dailySummaries;
     }
 
+    console.log(summaries)
+
     return summaries;
 }

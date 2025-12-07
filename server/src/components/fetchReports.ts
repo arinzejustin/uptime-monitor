@@ -12,6 +12,7 @@ export async function fetchReports(query: {
     const domains = query.domains || [];
 
     if (query.useCache && domains.length > 0) {
+        console.log('using cache')
         const cached = await getCachedSummaries(domains, days);
         if (cached.length > 0) {
             return groupByDomain(cached);

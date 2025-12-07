@@ -64,11 +64,11 @@ export async function getApiKeyInfo(keyId: string) {
 }
 
 export async function updateKeyUsage(keyHash: string) {
-    // const { error } = await supabase.rpc("increment_key_usage", {
-    //     key_hash: keyHash
-    // });
+    const { error } = await supabase.rpc("increment_key_usage", {
+        key_hash: keyHash
+    });
 
-    // if (error) {
-    //     console.error("Failed to update key usage:", error);
-    // }
+    if (error) {
+        console.error("Failed to update key usage:", error);
+    }
 }
