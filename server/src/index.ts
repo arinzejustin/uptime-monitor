@@ -264,7 +264,6 @@ app.post(
 
 const summaryQuerySchema = z.object({
   domains: z.array(z.string()),
-  limit: z.coerce.number().int().min(1).max(10000000).default(10000000),
   days: z.coerce.number().int().min(1).max(60).default(60),
   useCache: z.boolean().default(true),
 });
@@ -281,7 +280,6 @@ app.post(
         domains: query.domains,
         days: query.days,
         useCache: query.useCache,
-        limit: query.limit,
       });
 
       console.log(result)

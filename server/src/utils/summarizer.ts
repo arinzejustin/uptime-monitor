@@ -3,6 +3,8 @@ import { format, parseISO } from "date-fns";
 export function summarizeDomainData(records: any[], domains?: string[]) {
     const domainMap: Record<string, Record<string, any[]>> = {};
 
+    console.log(records, domains)
+
     for (const rec of records) {
         if (!rec.results) continue;
 
