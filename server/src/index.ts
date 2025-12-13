@@ -282,8 +282,6 @@ app.post(
         useCache: query.useCache,
       });
 
-      console.log(result)
-
       return c.json({
         success: true,
         message: 'Fetched summary successfully',
