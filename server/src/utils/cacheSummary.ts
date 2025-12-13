@@ -17,8 +17,6 @@ export async function getCachedSummaries(domains: string[], days: number) {
         return [];
     }
 
-    console.log(data)
-
     return (data || []).map(item => ({
         ...item,
         time_down: item.time_down || '0m'
