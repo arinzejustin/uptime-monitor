@@ -11,6 +11,10 @@ export async function fetchReports(query: {
   days?: number;
   useCache?: boolean;
 }) {
+  let allData: any[] = [];
+  let from = 0;
+  const pageSize = 1000;
+
   const days = query.days ?? 60;
   const domains = query.domains ?? [];
 
@@ -24,15 +28,23 @@ export async function fetchReports(query: {
   const sinceDate = new Date();
   sinceDate.setDate(sinceDate.getDate() - days);
 
-  const { data, error } = await supabase.rpc("get_reports_since", {
-    days_back: days,
-  });
+  while (true) {
+    const { data, error } = await supabase
+      .from(REPORTS_TABLE)
+      .select("timestamp, results")
+      .gte("timestamp", sinceDate.toISOString())
+      .order("timestamp", { ascending: true })
+      .range(from, from + pageSize - 1);
 
-  if (error) {
-    throw new Error(`Failed to fetch reports: ${error.message}`);
+    if (error) throw new Error(error.message);
+
+    allData = allData.concat(data ?? []);
+    if (!data || data.length < pageSize) break;
+
+    from += pageSize;
   }
 
-  const filteredData = data.map((row: any) => ({
+  const filteredData = allData.map((row: any) => ({
     ...row,
     results: row.results.filter(
       (r: HealthCheckResult) =>
@@ -46,9 +58,9 @@ export async function fetchReports(query: {
     await saveSummariesToCache(summaries);
   }
   console.log("sinceDate:", sinceDate.toISOString());
-  console.log("rows fetched:", data.length);
-  console.log("first row timestamp:", data[0]?.timestamp);
-  console.log("last row timestamp:", data[data.length - 1]?.timestamp);
+  console.log("rows fetched:", allData.length);
+  console.log("first row timestamp:", allData[0]?.timestamp);
+  console.log("last row timestamp:", allData[allData.length - 1]?.timestamp);
 
   return summaries;
 }

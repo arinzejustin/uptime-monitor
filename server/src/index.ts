@@ -228,7 +228,7 @@ app.post(
 // === Query Reports ===
 const querySchema = z.object({
   environment: z.string().optional(),
-  url: z.string().url().optional(),
+  url: z.url().optional(),
   status: z.enum(['up', 'down']).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
