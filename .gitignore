@@ -46,3 +46,4 @@ temp/
 .tmp/
 reports/uptime*.json
 dashboard
+_.json
