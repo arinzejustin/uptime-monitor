@@ -4,18 +4,17 @@ import {
   getCachedSummaries,
   saveSummariesToCache,
 } from "../utils/cacheSummary.js";
+import type { HealthCheckResult } from "../../types.d.js";
 
 export async function fetchReports(query: {
   domains?: string[];
   days?: number;
   useCache?: boolean;
 }) {
-  const days = query.days || 60;
-  const domains = query.domains || [];
-  console.log(query.useCache, query.days, JSON.stringify(query.domains));
+  const days = query.days ?? 60;
+  const domains = query.domains ?? [];
 
   if (query.useCache && domains.length > 0) {
-    console.log("using cache");
     const cached = await getCachedSummaries(domains, days);
     if (cached.length > 0) {
       return groupByDomain(cached);
@@ -25,32 +24,27 @@ export async function fetchReports(query: {
   const sinceDate = new Date();
   sinceDate.setDate(sinceDate.getDate() - days);
 
-  let supabaseQuery = supabase
+  const { data, error } = await supabase
     .from(REPORTS_TABLE)
     .select("timestamp, results")
     .gte("timestamp", sinceDate.toISOString())
     .order("timestamp", { ascending: true });
 
-  if (domains.length > 0) {
-    domains.map((domain) => ({
-      domain: domain,
-    }));
-
-    supabaseQuery = supabaseQuery.or(
-      domains
-        .map((domain) => `results.cs.${JSON.stringify([{ domain }])}`)
-        .join(","),
-    );
-  }
-
-  const { data, error } = await supabaseQuery;
-
   if (error) {
-    console.log(error);
     throw new Error(`Failed to fetch reports: ${error.message}`);
   }
 
-  const summaries = summarizeDomainData(data, domains);
+  const filteredData = data.map((row) => ({
+    ...row,
+    results:
+      domains.length === 0
+        ? row.results
+        : row.results.filter((r: HealthCheckResult) =>
+            domains.includes(r.domain),
+          ),
+  }));
+
+  const summaries = summarizeDomainData(filteredData, domains);
 
   if (query.useCache && domains.length > 0) {
     await saveSummariesToCache(summaries);
