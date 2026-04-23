@@ -129,6 +129,13 @@ app.get('/get-token', (c) => {
   return c.redirect('https://wa.me/+2347081317077?text=Hi%20Justin,%20I%20need%20your%20live%20cam%20token')
 })
 
+
+app.get('/verify', (c) => {
+  const { token } = c.req.query();
+  const response = validateLiveCamToken(token!);
+  return c.json({ valid: response });
+})
+
 const validateTokenSchema = z.object({
   token: z.string().min(1).max(10000),
 })
